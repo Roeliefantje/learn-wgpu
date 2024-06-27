@@ -45,10 +45,6 @@ pub async fn run() {
                             Err(e) => eprintln!("{:?}", e),
                         }
                     }
-
-                    WindowEvent::CursorMoved { device_id, position } => {
-                        state.input(event);
-                    }
                     
                     _ => {}
                 }
