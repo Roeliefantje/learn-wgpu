@@ -1,5 +1,4 @@
-use std::ops::ControlFlow;
-
+use wgpu::util::DeviceExt;
 use winit::{
     event::*,
     event_loop::EventLoop,
@@ -7,6 +6,53 @@ use winit::{
     window::WindowBuilder,
     window::Window,
 };
+
+const COLOR_BASED_ON_MOUSE: bool = false;
+
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [0.0, 0.5, 0.0], color: [1.0, 0.0, 0.0] },
+    Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+    Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+];
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3]
+}
+
+impl Vertex {
+
+    const ATTRIBS: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0=> Float32x3, 1 => Float32x3];
+
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        //Verbose way:
+        // wgpu::VertexBufferLayout {
+        //     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+        //     step_mode: wgpu::VertexStepMode::Vertex,
+        //     attributes: &[
+        //         wgpu::VertexAttribute {
+        //             offset: 0,
+        //             shader_location: 0,
+        //             format: wgpu::VertexFormat::Float32x3,
+        //         },
+        //         wgpu::VertexAttribute {
+        //             offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+        //             shader_location: 1,
+        //             format: wgpu::VertexFormat::Float32x3,
+        //         }
+        //     ]
+        // }
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+
 
 pub async fn run() {
     env_logger::init();
@@ -73,6 +119,8 @@ struct State<'a> {
     window: &'a Window,
     clear_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
+    num_vertices: u32,
 }
 
 impl<'a> State<'a> {
@@ -146,7 +194,9 @@ impl<'a> State<'a> {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[], //No buffers for now as theyre initiated in the shader?
+                buffers: &[
+                    Vertex::desc(),
+                ],
             },
             fragment: Some(wgpu::FragmentState { module: &shader, entry_point: "fs_main", targets: &[Some(wgpu::ColorTargetState {
                 format: config.format,
@@ -167,7 +217,15 @@ impl<'a> State<'a> {
             multiview: None,
         });
 
+        let vertex_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
 
+        let num_vertices = VERTICES.len() as u32;
 
         Self {
             window,
@@ -177,7 +235,9 @@ impl<'a> State<'a> {
             config,
             size,
             clear_color,
-            render_pipeline
+            render_pipeline,
+            vertex_buffer,
+            num_vertices
         }
     }
 
@@ -198,12 +258,14 @@ impl<'a> State<'a> {
 
         match event {
             WindowEvent::CursorMoved { device_id: _, position } => {
-                self.clear_color = wgpu::Color {
-                    r: position.x / (self.size.width as f64),
-                    g: position.y / (self.size.height as f64),
-                    b: 0.0,
-                    a: 1.0
-                };
+                if COLOR_BASED_ON_MOUSE {
+                    self.clear_color = wgpu::Color {
+                        r: position.x / (self.size.width as f64),
+                        g: position.y / (self.size.height as f64),
+                        b: 0.0,
+                        a: 1.0
+                    };
+                }
                 false
             }
             _ => false
@@ -240,7 +302,8 @@ impl<'a> State<'a> {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.draw(0..self.num_vertices, 0..1);
         }
 
         //Queue will accept anything that implements IntoIter.
